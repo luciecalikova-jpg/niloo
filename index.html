@@ -260,11 +260,71 @@ function nilooShowWelcome(show){document.getElementById('nilooWelcome')?.toggleA
 function nilooAuthComingSoon(provider){const note=document.getElementById('nilooWelcomeNote');note.textContent='Přihlášení přes '+provider+' zatím připravujeme. Můžeš pokračovat e-mailem nebo se jen podívat.';note.classList.add('show')}
 let nilooEmailMode='choose';
 function nilooNote(message){const n=document.getElementById('nilooWelcomeNote');n.textContent=message;n.classList.add('show')}
-function nilooOpenEmailAuth(){document.getElementById('nilooEmailForm').classList.toggle('show');document.getElementById('nilooWelcomeNote').classList.remove('show');document.getElementById('nilooEmail').focus()}
-function nilooResetEmail(){nilooEmailMode='choose';document.getElementById('nilooEmail').readOnly=false;document.getElementById('nilooEmailStep').hidden=true;document.getElementById('nilooEmailChoices').hidden=true;document.getElementById('nilooEmailBack').hidden=true;document.getElementById('nilooSendButton').hidden=false;document.getElementById('nilooSendButton').textContent='Pokračovat';document.getElementById('nilooPassword').value='';document.getElementById('nilooWelcomeNote').classList.remove('show')}
-function nilooChooseEmail(mode){nilooEmailMode=mode;document.getElementById('nilooEmailChoices').hidden=true;document.getElementById('nilooEmailBack').hidden=false;document.getElementById('nilooSendButton').hidden=false;if(mode==='login'){document.getElementById('nilooEmailStep').hidden=false;document.getElementById('nilooPassword').required=true;document.getElementById('nilooSendButton').textContent='Přihlásit se';document.getElementById('nilooPassword').focus()}else{document.getElementById('nilooEmailStep').hidden=true;document.getElementById('nilooPassword').required=false;document.getElementById('nilooSendButton').textContent='Ověřit e-mail';nilooNote('Pošleme ti ověřovací odkaz. Po kliknutí si nastavíš heslo.')}}
-async function nilooEmailSubmit(event){event.preventDefault();const email=document.getElementById('nilooEmail').value.trim(),btn=document.getElementById('nilooSendButton');if(!nilooClient){nilooNote('Připojení není dostupné. Zkontroluj internet.');return}if(nilooEmailMode==='choose'){document.getElementById('nilooEmailChoices').hidden=false;btn.hidden=true;document.getElementById('nilooEmailBack').hidden=false;document.getElementById('nilooEmail').readOnly=true;return}btn.disabled=true;btn.textContent='Chvilku…';try{if(nilooEmailMode==='login'){const {error}=await nilooClient.auth.signInWithPassword({email,password:document.getElementById('nilooPassword').value});if(error)throw error}else{const {error}=await nilooClient.auth.signInWithOtp({email,options:{emailRedirectTo:NILOO_REDIRECT,shouldCreateUser:true}});if(error)throw error;localStorage.setItem('niloo-await-password-email',email.toLowerCase());document.getElementById('nilooEmailForm').classList.remove('show');nilooNote('Mrkni do e-mailu! 💜 Poslali jsme ti odkaz pro ověření. Stačí na něj kliknout a potom si nastavíš heslo. Nic nepřišlo? Zkontroluj i spam.');} }catch(e){nilooNote(nilooEmailMode==='login'?'Přihlášení se nepodařilo. Zkontroluj e-mail a heslo, případně použij obnovení hesla.':'Odkaz se nepodařilo odeslat: '+(e.message||'Zkus to znovu.'))}finally{btn.disabled=false;btn.textContent=nilooEmailMode==='login'?'Přihlásit se':'Ověřit e-mail'}}
-async function nilooForgotPassword(){const email=document.getElementById('nilooEmail').value.trim();if(!email){nilooNote('Nejdřív vyplň svůj e-mail.');return}try{const {error}=await nilooClient.auth.resetPasswordForEmail(email,{redirectTo:NILOO_REDIRECT});if(error)throw error;nilooNote('Mrkni do e-mailu! 💜 Pokud k adrese existuje účet, přijde odkaz pro nastavení hesla. Zkontroluj i spam.');document.getElementById('nilooEmailForm').classList.remove('show')}catch(e){nilooNote('Odkaz se nepodařilo odeslat. Zkus to prosím později.')}}
+function nilooOpenEmailAuth(){nilooResetEmail();document.getElementById('nilooEmailForm').classList.toggle('show');document.getElementById('nilooWelcomeNote').classList.remove('show');document.getElementById('nilooEmail').focus()}
+function nilooResetEmail(){nilooEmailMode='choose';document.getElementById('nilooEmail').readOnly=false;document.getElementById('nilooEmailStep').hidden=true;document.getElementById('nilooPassword').required=false;document.getElementById('nilooEmailChoices').hidden=true;document.getElementById('nilooEmailBack').hidden=true;document.getElementById('nilooSendButton').hidden=false;document.getElementById('nilooSendButton').textContent='Pokračovat';document.getElementById('nilooPassword').value='';document.getElementById('nilooWelcomeNote').classList.remove('show')}
+function nilooFriendlyMailError(error){
+ const msg=String(error?.message||'').toLowerCase();
+ if(msg.includes('rate limit')||msg.includes('too many')||error?.status===429)return 'Teď už nemůžeme poslat další e-mail 💜 Vyčerpali jsme dočasný limit odesílání. Zkus to prosím později. Přesný čas obnovení bohužel neznáme.';
+ if(msg.includes('network')||msg.includes('fetch')||msg.includes('load failed'))return 'E-mail se nepodařilo odeslat. Zkontroluj internetové připojení a zkus to znovu.';
+ return 'E-mail se nepodařilo odeslat. Zkus to prosím později.';
+}
+function nilooMailSent(){
+ document.getElementById('nilooEmailForm').classList.remove('show');
+ nilooNote('Mrkni do e-mailu! 💜 Poslali jsme ti odkaz pro ověření. Stačí na něj kliknout a potom si nastavíš heslo. Nic nepřišlo? Zkontroluj i spam.');
+}
+async function nilooChooseEmail(mode){
+ nilooEmailMode=mode;
+ document.getElementById('nilooEmailChoices').hidden=true;
+ document.getElementById('nilooEmailBack').hidden=false;
+ document.getElementById('nilooSendButton').hidden=false;
+ document.getElementById('nilooWelcomeNote').classList.remove('show');
+ if(mode==='login'){
+  document.getElementById('nilooEmailStep').hidden=false;
+  document.getElementById('nilooPassword').required=true;
+  document.getElementById('nilooSendButton').textContent='Přihlásit se';
+  document.getElementById('nilooPassword').focus();
+ }else{
+  document.getElementById('nilooEmailStep').hidden=true;
+  document.getElementById('nilooPassword').required=false;
+  document.getElementById('nilooSendButton').textContent='Registrovat se';
+  // Registration choice is the confirmation: send the verification link immediately.
+  await nilooEmailSubmit(null);
+ }
+}
+async function nilooEmailSubmit(event){
+ if(event)event.preventDefault();
+ const email=document.getElementById('nilooEmail').value.trim(),btn=document.getElementById('nilooSendButton');
+ if(!email||!document.getElementById('nilooEmail').checkValidity()){
+  nilooNote('Vyplň prosím platnou e-mailovou adresu.');return;
+ }
+ if(!nilooClient){nilooNote('Připojení není dostupné. Zkontroluj internet.');return}
+ if(nilooEmailMode==='choose'){
+  document.getElementById('nilooEmailChoices').hidden=false;
+  btn.hidden=true;
+  document.getElementById('nilooEmailBack').hidden=false;
+  document.getElementById('nilooEmail').readOnly=true;
+  return;
+ }
+ if(btn.disabled)return;
+ btn.disabled=true;btn.textContent='Chvilku…';
+ try{
+  if(nilooEmailMode==='login'){
+   const {error}=await nilooClient.auth.signInWithPassword({email,password:document.getElementById('nilooPassword').value});
+   if(error)throw error;
+  }else{
+   const {error}=await nilooClient.auth.signInWithOtp({email,options:{emailRedirectTo:NILOO_REDIRECT,shouldCreateUser:true}});
+   if(error)throw error;
+   localStorage.setItem('niloo-await-password-email',email.toLowerCase());
+   nilooMailSent();
+  }
+ }catch(e){
+  nilooNote(nilooEmailMode==='login'?'Přihlášení se nepodařilo. Zkontroluj e-mail a heslo, případně použij obnovení hesla.':nilooFriendlyMailError(e));
+ }finally{
+  btn.disabled=false;
+  btn.textContent=nilooEmailMode==='login'?'Přihlásit se':'Registrovat se';
+ }
+}
+async function nilooForgotPassword(){const email=document.getElementById('nilooEmail').value.trim();if(!email){nilooNote('Nejdřív vyplň svůj e-mail.');return}try{const {error}=await nilooClient.auth.resetPasswordForEmail(email,{redirectTo:NILOO_REDIRECT});if(error)throw error;nilooNote('Mrkni do e-mailu! 💜 Pokud k adrese existuje účet, přijde odkaz pro nastavení hesla. Zkontroluj i spam.');document.getElementById('nilooEmailForm').classList.remove('show')}catch(e){nilooNote(nilooFriendlyMailError(e))}}
 function nilooPromptPasswordSetup(){document.getElementById('nilooPasswordSetup').classList.add('show');nilooShowWelcome(true);document.getElementById('nilooEmailForm').classList.remove('show');document.getElementById('nilooWelcomeNote').classList.remove('show')}
 async function nilooSetPassword(event){event.preventDefault();const pass=document.getElementById('nilooNewPassword').value,again=document.getElementById('nilooNewPasswordAgain').value,btn=document.getElementById('nilooSetPasswordButton');if(pass!==again){nilooNote('Hesla se neshodují.');return}btn.disabled=true;try{const {error}=await nilooClient.auth.updateUser({password:pass});if(error)throw error;localStorage.removeItem('niloo-await-password-email');document.getElementById('nilooPasswordSetup').classList.remove('show');nilooShowWelcome(false);toast('Heslo je nastavené 💜')}catch(e){nilooNote('Heslo se nepodařilo uložit: '+(e.message||'Zkus to znovu.'))}finally{btn.disabled=false}}
 // Cloud mode never uploads the preview dataset. Receipts' binary attachments remain local.
